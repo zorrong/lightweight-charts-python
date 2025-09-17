@@ -161,7 +161,7 @@ if __name__ == "__main__":
 
     # state for TF/WS/Indicators
     chart._symbol = symbol
-    chart._interval = interval
+    chart._tf = interval
     chart._df = df.copy()
     chart._ws = None
     chart._ws_thread = None
@@ -183,7 +183,7 @@ if __name__ == "__main__":
         if not new_sym or new_sym == getattr(c, '_symbol', None):
             return
         try:
-            new_df = fetch_klines(new_sym, c._interval, limit=500)
+            new_df = fetch_klines(new_sym, c._tf, limit=500)
         except Exception as e:
             print(f"[symbol] fetch error for {new_sym}: {e}")
             # reset textbox to current symbol on failure
@@ -193,54 +193,59 @@ if __name__ == "__main__":
         c._df = new_df.copy()
         c.set(new_df)
         # update watermark text
-        c.run_script(f"{c.id}.chart.applyOptions({{watermark: {{ text: '{new_sym} {c._interval} • Binance' }} }})")
+        c.run_script(f"{c.id}.chart.applyOptions({{watermark: {{ text: '{new_sym} {c._tf} • Binance' }} }})")
         # re-calc indicators if active
         if 'SMA 50' in c._indicators:
-            c._indicators['SMA 50'].set(calculate_sma(c._df, 50).dropna())
+            _d = calculate_sma(c._df, 50).dropna().rename(columns={'value': 'SMA 50'})
+            c._indicators['SMA 50'].set(_d)
         if 'EMA 20' in c._indicators:
-            c._indicators['EMA 20'].set(calculate_ema(c._df, 20).dropna())
+            _d = calculate_ema(c._df, 20).dropna().rename(columns={'value': 'EMA 20'})
+            c._indicators['EMA 20'].set(_d)
         if 'RSI 14' in c._indicators:
-            c._indicators['RSI 14'].set(calculate_rsi(c._df, 14).dropna())
+            _d = calculate_rsi(c._df, 14).dropna().rename(columns={'value': 'RSI 14'})
+            c._indicators['RSI 14'].set(_d)
         # restart websocket
         try:
             if c._ws:
                 c._ws.close()
         except Exception:
             pass
-        t2 = threading.Thread(target=start_ws, args=(c, new_sym, c._interval), daemon=True)
+        t2 = threading.Thread(target=start_ws, args=(c, new_sym, c._tf), daemon=True)
         c._ws_thread = t2
         t2.start()
 
+    # create the symbol textbox on topbar
     chart.topbar.textbox('symbol', initial_text=symbol, align='left', func=_on_symbol_change)
 
     # Timeframe switcher
     def _on_tf_change(c: Chart):
-        new_tf = c.topbar['tf'].value
-        if new_tf == getattr(c, '_interval', None):
+        new_tf = str(c.topbar['tf'].value)
+        if not new_tf or new_tf == getattr(c, '_tf', None):
             return
-        c._interval = new_tf
-        new_df = fetch_klines(c._symbol, new_tf, limit=500)
+        try:
+            new_df = fetch_klines(c._symbol, new_tf, limit=500)
+        except Exception as e:
+            print(f"[tf] fetch error for {c._symbol} {new_tf}: {e}")
+            return
+        c._tf = new_tf
         c._df = new_df.copy()
         c.set(new_df)
-        # update watermark text
         c.run_script(f"{c.id}.chart.applyOptions({{watermark: {{ text: '{c._symbol} {new_tf} • Binance' }} }})")
-        # re-calc indicators if active
         if 'SMA 50' in c._indicators:
-            data = calculate_sma(c._df, 50).dropna()
-            c._indicators['SMA 50'].set(data)
+            _d = calculate_sma(c._df, 50).dropna().rename(columns={'value': 'SMA 50'})
+            c._indicators['SMA 50'].set(_d)
         if 'EMA 20' in c._indicators:
-            data = calculate_ema(c._df, 20).dropna()
-            c._indicators['EMA 20'].set(data)
+            _d = calculate_ema(c._df, 20).dropna().rename(columns={'value': 'EMA 20'})
+            c._indicators['EMA 20'].set(_d)
         if 'RSI 14' in c._indicators:
-            data = calculate_rsi(c._df, 14).dropna()
-            c._indicators['RSI 14'].set(data)
-        # restart websocket
+            _d = calculate_rsi(c._df, 14).dropna().rename(columns={'value': 'RSI 14'})
+            c._indicators['RSI 14'].set(_d)
         try:
             if c._ws:
                 c._ws.close()
         except Exception:
             pass
-        t2 = threading.Thread(target=start_ws, args=(c, c._symbol, new_tf), daemon=True)
+        t2 = threading.Thread(target=start_ws, args=(c, c._symbol, c._tf), daemon=True)
         c._ws_thread = t2
         t2.start()
 
@@ -252,7 +257,7 @@ if __name__ == "__main__":
         name = 'SMA 50'
         if pressed and name not in c._indicators:
             line = c.create_line(name)
-            data = calculate_sma(c._df, 50).dropna()
+            data = calculate_sma(c._df, 50).dropna().rename(columns={'value': name})
             line.set(data)
             c._indicators[name] = line
         elif not pressed and name in c._indicators:
@@ -264,7 +269,7 @@ if __name__ == "__main__":
         name = 'EMA 20'
         if pressed and name not in c._indicators:
             line = c.create_line(name)
-            data = calculate_ema(c._df, 20).dropna()
+            data = calculate_ema(c._df, 20).dropna().rename(columns={'value': name})
             line.set(data)
             c._indicators[name] = line
         elif not pressed and name in c._indicators:
@@ -279,7 +284,7 @@ if __name__ == "__main__":
             if getattr(c, '_rsi_chart', None) is None:
                 c._rsi_chart = c.create_subchart(width=1, height=0.25, sync=True)
             line = c._rsi_chart.create_line(name, color='rgba(255, 214, 102, 0.9)', width=2)
-            data = calculate_rsi(c._df, 14).dropna()
+            data = calculate_rsi(c._df, 14).dropna().rename(columns={'value': name})
             line.set(data)
             # horizontal lines 70/30
             h70 = c._rsi_chart.horizontal_line(70, color='rgba(255,255,255,0.25)', width=1, style='dashed', text='70', axis_label_visible=True)
@@ -310,3 +315,27 @@ if __name__ == "__main__":
 
     # Show UI and block main thread (ws keeps running in daemon thread)
     chart.show(block=True)
+
+    # update indicators
+    inds = getattr(chart, '_indicators', {})
+    try:
+        if 'SMA 50' in inds:
+            sma = calculate_sma(df, 50).dropna()
+            if not sma.empty:
+                s = sma.iloc[-1].copy()
+                s.rename({'value': 'SMA 50'}, inplace=True)
+                inds['SMA 50'].update(s)
+        if 'EMA 20' in inds:
+            ema = calculate_ema(df, 20).dropna()
+            if not ema.empty:
+                s = ema.iloc[-1].copy()
+                s.rename({'value': 'EMA 20'}, inplace=True)
+                inds['EMA 20'].update(s)
+        if 'RSI 14' in inds:
+            rsi = calculate_rsi(df, 14).dropna()
+            if not rsi.empty:
+                s = rsi.iloc[-1].copy()
+                s.rename({'value': 'RSI 14'}, inplace=True)
+                inds['RSI 14'].update(s)
+    except Exception:
+        pass
